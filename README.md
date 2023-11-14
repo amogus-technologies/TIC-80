@@ -21,8 +21,9 @@ To make a retro styled game, the whole process of creation and execution takes p
   [Ruby](https://www.ruby-lang.org/en/),
   [Wren](http://wren.io/),
   [Fennel](https://fennel-lang.org),
-  [Squirrel](http://www.squirrel-lang.org), and
-  [Janet](https://janet-lang.org).
+  [Squirrel](http://www.squirrel-lang.org),
+  [Janet](https://janet-lang.org), and
+  [Python](https://www.python.org/).
 - Games can have mouse and keyboard as input
 - Games can have up to 4 controllers as input (with up to 8 buttons, each)
 - Built-in editors: for code, sprites, world maps, sound effects and music
@@ -162,6 +163,14 @@ sudo apt-get install -t jessie-backports liblua5.3-dev
 git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
 cmake ..
 make -j4
+
+# install software ubuntu 22.04.3 LTS
+sudo apt-get install git build-essential ruby-full libsdl2-dev zlib1g-dev
+sudo apt-get install liblua5.3-dev
+sudo apt-get install libcurl4-openssl-dev
+git clone --recursive https://github.com/nesbox/TIC-80 && cd TIC-80/build
+cmake ..
+make -j4
 ```
 Install with [Install instructions](#install-instructions)
 
@@ -250,3 +259,4 @@ You can find iOS/tvOS version here
 * David St-Hilaire - [GitHub @sthilaid](https://github.com/sthilaid)
 * Alec Troemel - [Github @alectroemel](https://github.com/AlecTroemel)
 * Kolten Pearson - [Github @koltenpearson](https://github.com/koltenpearson)
+* Cort Stratton - [Github @cdwfs](https://github.com/cdwfs)

@@ -486,7 +486,7 @@ void tic_core_tick(tic_mem* tic, tic_tick_data* data)
             data->start = data->counter(core->data->data);
 
             // TODO: does where to fetch code from need to be a config option so this isn't hard
-            // coded for just a single langage? perhaps change it later when we have a second script
+            // coded for just a single language? perhaps change it later when we have a second script
             // engine that uses BINARY?
             if (strcmp(config->name,"wasm")==0) {
                 code = tic->cart.binary.data;
@@ -537,6 +537,10 @@ void tic_core_resume(tic_mem* memory)
         memcpy(memory->ram, &core->pause.ram, sizeof(tic_ram));
         core->data->start = core->pause.time.start + core->data->counter(core->data->data) - core->pause.time.paused;
         memory->input.data = core->pause.input;
+    }
+    else
+    {
+        tic_api_reset(memory);
     }
 }
 

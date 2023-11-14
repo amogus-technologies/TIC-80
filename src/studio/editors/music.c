@@ -1053,6 +1053,11 @@ static void setChannelPattern(Music* music, s32 delta, s32 channel)
     setChannelPatternValue(music, pattern + delta, music->frame, channel);
 }
 
+static inline bool keyWasPressedOnce(tic_mem* tic, s32 key)
+{
+    return tic_api_keyp(tic, key, -1, -1);
+}
+
 static void processTrackerKeyboard(Music* music)
 {
     tic_mem* tic = music->tic;
@@ -1102,6 +1107,9 @@ static void processTrackerKeyboard(Music* music)
                 resetSelection(music);
         }
 
+    static const u8 newOctaveIndex = 16;
+    static const u8 keboardShift = 5;
+
     static const u8 Piano[] =
     {
         tic_key_z,
@@ -1116,6 +1124,11 @@ static void processTrackerKeyboard(Music* music)
         tic_key_n,
         tic_key_j,
         tic_key_m,
+        tic_key_comma,
+        tic_key_l,
+        tic_key_period,
+        tic_key_semicolon,
+        tic_key_slash,
 
         // octave +1
         tic_key_q,
@@ -1147,7 +1160,12 @@ static void processTrackerKeyboard(Music* music)
         {
         case ColumnNote:
         case ColumnSemitone:
-            if (keyWasPressed(music->studio, tic_key_1) || keyWasPressed(music->studio, tic_key_a))
+            if(keyWasPressedOnce(tic, tic_key_z) && shift) 
+                music->last.octave -= 1;
+            else if(keyWasPressedOnce(tic, tic_key_x) && shift) 
+                music->last.octave += 1;
+
+            if (keyWasPressed(music->studio, tic_key_a))
             {
                 setStopNote(music);
                 downRow(music);
@@ -1158,17 +1176,17 @@ static void processTrackerKeyboard(Music* music)
 
                 for (s32 i = 0; i < COUNT_OF(Piano); i++)
                 {
-                    if (keyWasPressed(music->studio, Piano[i]))
+                    if (keyWasPressed(music->studio, Piano[i]) && !shift)
                     {
-                        s32 note = i % NOTES;
-                        s32 octave = i / NOTES + music->last.octave;
+                        s32 note = (i > newOctaveIndex ? i - keboardShift : i)  % NOTES;
+                        s32 octave = (i - note) / NOTES + music->last.octave;
                         s32 sfx = music->last.sfx;
                         setNote(music, note, octave, sfx);
 
                         downRow(music);
 
                         break;
-                    }               
+                    } 
                 }
             }
             break;
@@ -1257,7 +1275,7 @@ static void processPatternKeyboard(Music* music)
     else if(keyWasPressed(music->studio, tic_key_left))    colLeft(music);
     else if(keyWasPressed(music->studio, tic_key_right))   colRight(music);
     else if(keyWasPressed(music->studio, tic_key_down) 
-        || keyWasPressed(music->studio, tic_key_return)) 
+            || enterWasPressed(music->studio)) 
         music->tracker.edit.y = music->scroll.pos;
     else
     {
@@ -1442,6 +1460,9 @@ static void processPianoKeyboard(Music* music)
 {
     tic_mem* tic = music->tic;
 
+    if(tic_api_key(tic, tic_key_ctrl) || tic_api_key(tic, tic_key_alt))
+        return;
+
     if(keyWasPressed(music->studio, tic_key_up)) music->piano.edit.y--;
     else if(keyWasPressed(music->studio, tic_key_down)) music->piano.edit.y++;
     else if(keyWasPressed(music->studio, tic_key_left)) music->piano.edit.x--;
@@ -1539,7 +1560,7 @@ static void processKeyboard(Music* music)
                 ? playTrack(music)
                 : stopTrack(music);
         }
-        else if(keyWasPressed(music->studio, tic_key_return))
+        else if(enterWasPressed(music->studio))
         {
             stopped
                 ? (shift
@@ -1547,18 +1568,18 @@ static void processKeyboard(Music* music)
                     : playFrame(music))
                 : stopTrack(music);
         }
+    }
 
-        switch (music->tab)
-        {
-        case MUSIC_TRACKER_TAB:
-            music->tracker.edit.y >= 0 
-                ? processTrackerKeyboard(music)
-                : processPatternKeyboard(music);
-            break;
-        case MUSIC_PIANO_TAB:
-            processPianoKeyboard(music);
-            break;
-        }
+    switch (music->tab)
+    {
+    case MUSIC_TRACKER_TAB:
+        music->tracker.edit.y >= 0 
+            ? processTrackerKeyboard(music)
+            : processPatternKeyboard(music);
+        break;
+    case MUSIC_PIANO_TAB:
+        processPianoKeyboard(music);
+        break;
     }
 }
 

@@ -115,20 +115,10 @@ typedef struct
 
     } theme;
 
-    s32 gifScale;
-    s32 gifLength;
-    
     bool checkNewVersion;
     bool cli;
     bool soft;
-
-#if defined(CRT_SHADER_SUPPORT)
-    struct
-    {
-        const char* vertex;
-        const char* pixel;
-    } shader;
-#endif
+    bool revertScroll;
 
     struct StudioOptions
     {

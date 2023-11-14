@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.3)
 
 set(VERSION_MAJOR 1)
-set(VERSION_MINOR 1)
+set(VERSION_MINOR 2)
 set(VERSION_REVISION 0)
 set(VERSION_STATUS "-dev")
 string(TIMESTAMP VERSION_YEAR "%Y")
@@ -87,8 +87,8 @@ if(NOT BUILD_SDL)
     set(BUILD_SDLGPU OFF)
 endif()
 
-if(NOT N3DS AND NOT EMSCRIPTEN AND NOT BAREMETALPI)
-    set(USE_LIBUV TRUE CACHE STRING "Enable libuv")
+if(NOT RPI AND NOT N3DS AND NOT EMSCRIPTEN AND NOT BAREMETALPI)
+    set(USE_NAETT TRUE)
 endif()
 
 message("BUILD_SDLGPU: ${BUILD_SDLGPU}")
@@ -397,51 +397,25 @@ target_include_directories(squirrel PRIVATE ${SQUIRREL_DIR}/squirrel)
 target_include_directories(squirrel PRIVATE ${SQUIRREL_DIR}/sqstdlib)
 
 ################################
-# PocketPy (Python)
+# pocketpy (Python)
 ################################
 
-set(POCKETPY_DIR ${THIRDPARTY_DIR}/pocketpy)
+add_subdirectory(${THIRDPARTY_DIR}/pocketpy)
+target_compile_definitions(pocketpy PRIVATE PK_ENABLE_OS=0)
+include_directories(${THIRDPARTY_DIR}/pocketpy/include)
 
-if (${CMAKE_VERSION} VERSION_LESS "3.12.0") 
-    set(Python3_EXECUTABLE "python3")
-else()
-    find_package(Python3 COMPONENTS Interpreter)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(pocketpy PRIVATE -Wno-psabi)
 endif()
 
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} preprocess.py
-    WORKING_DIRECTORY ${POCKETPY_DIR}
-    RESULT_VARIABLE EXIT_CODE
-)
+# alias pocketpy to python for next steps
+set_target_properties(pocketpy PROPERTIES OUTPUT_NAME python)
+add_library(python ALIAS pocketpy)
 
-if(NOT ${EXIT_CODE} EQUAL 0)
-    message(FATAL_ERROR "python3 prebuild failed!!")
+if(EMSCRIPTEN)
+    # exceptions must be enabled for emscripten
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fexceptions")
 endif()
-
-add_library(
-    python
-    STATIC
-    ${POCKETPY_DIR}/c_bindings/pocketpy_c.cpp
-)
-set_target_properties(python PROPERTIES LINKER_LANGUAGE CXX)
-target_compile_definitions(python PRIVATE PK_ENABLE_OS=0)
-target_include_directories(python PRIVATE ${POCKETPY_DIR}/src)
-target_include_directories(python PUBLIC ${POCKETPY_DIR}/c_bindings)
-if (${CMAKE_VERSION} VERSION_LESS "3.8.0") 
-    set_target_properties(python PROPERTIES COMPILE_FLAGS "--std=c++17")
-else()
-    target_compile_features(python PRIVATE cxx_std_17)
-endif()
-
-# the export.h normally lives in the src subdirecty file, but needs to be seen
-# by the c bindings
-add_custom_command(
-    TARGET python PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-    ${POCKETPY_DIR}/src/export.h
-    ${POCKETPY_DIR}/c_bindings/export.h
-)
-
 
 ################################
 # GIFLIB
@@ -460,7 +434,9 @@ set(GIFLIB_SRC
 add_library(giflib STATIC ${GIFLIB_SRC})
 target_include_directories(giflib
     PRIVATE ${GIFLIB_DIR}
-    INTERFACE ${THIRDPARTY_DIR}/giflib)
+    INTERFACE 
+        ${THIRDPARTY_DIR}/giflib 
+        ${THIRDPARTY_DIR}/msf_gif)
 
 ################################
 # Blipbuf
@@ -470,11 +446,34 @@ add_library(blipbuf STATIC ${THIRDPARTY_DIR}/blip-buf/blip_buf.c)
 target_include_directories(blipbuf INTERFACE ${THIRDPARTY_DIR}/blip-buf)
 
 ################################
-# Duktape
+# QuickJS
 ################################
 
-add_library(duktape STATIC ${THIRDPARTY_DIR}/duktape/src/duktape.c)
-target_include_directories(duktape INTERFACE ${THIRDPARTY_DIR}/duktape/src)
+set(QUICKJS_DIR ${THIRDPARTY_DIR}/quickjs)
+
+file(STRINGS ${QUICKJS_DIR}/VERSION CONFIG_VERSION)
+
+add_library(quickjs STATIC
+    ${QUICKJS_DIR}/quickjs.c 
+    ${QUICKJS_DIR}/libregexp.c 
+    ${QUICKJS_DIR}/libunicode.c
+    ${QUICKJS_DIR}/cutils.c)
+
+target_compile_definitions(quickjs PUBLIC CONFIG_VERSION="${CONFIG_VERSION}")
+target_include_directories(quickjs INTERFACE ${QUICKJS_DIR})
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(quickjs PRIVATE DUMP_LEAKS)
+endif()
+
+if(BAREMETALPI OR N3DS)
+    target_compile_definitions(quickjs PRIVATE POOR_CLIB) 
+endif()
+
+if(LINUX)
+    target_compile_definitions(quickjs PUBLIC _GNU_SOURCE _POSIX_C_SOURCE=200112)
+    target_link_libraries(quickjs PUBLIC m dl pthread)
+endif()
 
 ################################
 # Janet
@@ -566,6 +565,7 @@ macro(MACRO_CORE SCRIPT DEFINE BUILD_DEPRECATED)
         PRIVATE
             ${THIRDPARTY_DIR}/moonscript
             ${THIRDPARTY_DIR}/fennel
+            ${POCKETPY_DIR}/src
         PUBLIC
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/src)
@@ -578,7 +578,7 @@ macro(MACRO_CORE SCRIPT DEFINE BUILD_DEPRECATED)
         squirrel
         python
         scheme
-        duktape
+        quickjs
         blipbuf
         zlib
     )
@@ -783,11 +783,11 @@ IS_DOS
         if("${CMAKE_SYSTEM_NAME}" STREQUAL "NintendoWii" OR "${CMAKE_SYSTEM_NAME}" STREQUAL "NintendoGameCube" OR GAMECUBE OR WII OR IS_DOS)
           add_custom_command(TARGET tic80_libretro
                POST_BUILD
-                   COMMAND ${CMAKE_SOURCE_DIR}/build/libretro/merge_static.sh $(AR) ${CMAKE_BINARY_DIR}/lib/tic80_libretro${LIBRETRO_SUFFIX}.${LIBRETRO_EXTENSION} ${CMAKE_BINARY_DIR}/lib/tic80_libretro_partial.a ${CMAKE_BINARY_DIR}/lib/libtic80core.a ${CMAKE_BINARY_DIR}/lib/liblua.a ${CMAKE_BINARY_DIR}/lib/libblipbuf.a ${CMAKE_BINARY_DIR}/lib/libduktape.a ${CMAKE_BINARY_DIR}/lib/libwren.a ${CMAKE_BINARY_DIR}/lib/libwasm.a ${CMAKE_BINARY_DIR}/lib/libjanet.a ${CMAKE_BINARY_DIR}/lib/libsquirrel.a ${CMAKE_BINARY_DIR}/lib/libscheme.a ${CMAKE_BINARY_DIR}/lib/libgiflib.a ${CMAKE_BINARY_DIR}/lib/liblpeg.a ${CMAKE_BINARY_DIR}/lib/libzlib.a ${MRUBY_LIB})
+                   COMMAND ${CMAKE_SOURCE_DIR}/build/libretro/merge_static.sh $(AR) ${CMAKE_BINARY_DIR}/lib/tic80_libretro${LIBRETRO_SUFFIX}.${LIBRETRO_EXTENSION} ${CMAKE_BINARY_DIR}/lib/tic80_libretro_partial.a ${CMAKE_BINARY_DIR}/lib/libtic80core.a ${CMAKE_BINARY_DIR}/lib/liblua.a ${CMAKE_BINARY_DIR}/lib/libblipbuf.a ${CMAKE_BINARY_DIR}/lib/libquickjs.a ${CMAKE_BINARY_DIR}/lib/libwren.a ${CMAKE_BINARY_DIR}/lib/libwasm.a ${CMAKE_BINARY_DIR}/lib/libjanet.a ${CMAKE_BINARY_DIR}/lib/libsquirrel.a ${CMAKE_BINARY_DIR}/lib/libscheme.a ${CMAKE_BINARY_DIR}/lib/libgiflib.a ${CMAKE_BINARY_DIR}/lib/liblpeg.a ${CMAKE_BINARY_DIR}/lib/libzlib.a ${MRUBY_LIB})
         else()
           add_custom_command(TARGET tic80_libretro
                POST_BUILD
-                   COMMAND ${CMAKE_SOURCE_DIR}/build/libretro/merge_static.sh $(AR) ${CMAKE_BINARY_DIR}/lib/tic80_libretro${LIBRETRO_SUFFIX}.${LIBRETRO_EXTENSION} ${CMAKE_BINARY_DIR}/lib/tic80_libretro_partial.a ${CMAKE_BINARY_DIR}/lib/libtic80core.a ${CMAKE_BINARY_DIR}/lib/liblua.a ${CMAKE_BINARY_DIR}/lib/libblipbuf.a ${CMAKE_BINARY_DIR}/lib/libduktape.a ${CMAKE_BINARY_DIR}/lib/libwren.a ${CMAKE_BINARY_DIR}/lib/libwasm.a ${CMAKE_BINARY_DIR}/lib/libsquirrel.a ${CMAKE_BINARY_DIR}/lib/libscheme.a ${CMAKE_BINARY_DIR}/lib/libjanet.a ${CMAKE_BINARY_DIR}/lib/libgiflib.a ${CMAKE_BINARY_DIR}/lib/liblpeg.a ${MRUBY_LIB})
+                   COMMAND ${CMAKE_SOURCE_DIR}/build/libretro/merge_static.sh $(AR) ${CMAKE_BINARY_DIR}/lib/tic80_libretro${LIBRETRO_SUFFIX}.${LIBRETRO_EXTENSION} ${CMAKE_BINARY_DIR}/lib/tic80_libretro_partial.a ${CMAKE_BINARY_DIR}/lib/libtic80core.a ${CMAKE_BINARY_DIR}/lib/liblua.a ${CMAKE_BINARY_DIR}/lib/libblipbuf.a ${CMAKE_BINARY_DIR}/lib/libquickjs.a ${CMAKE_BINARY_DIR}/lib/libwren.a ${CMAKE_BINARY_DIR}/lib/libwasm.a ${CMAKE_BINARY_DIR}/lib/libsquirrel.a ${CMAKE_BINARY_DIR}/lib/libscheme.a ${CMAKE_BINARY_DIR}/lib/libjanet.a ${CMAKE_BINARY_DIR}/lib/libgiflib.a ${CMAKE_BINARY_DIR}/lib/liblpeg.a ${MRUBY_LIB})
         endif()
     else()
         add_library(tic80_libretro SHARED
@@ -880,12 +880,11 @@ if(BUILD_DEMO_CARTS)
 
     add_executable(xplode
         ${TOOLS_DIR}/xplode.c
-        ${CMAKE_SOURCE_DIR}/src/ext/gif.c
         ${CMAKE_SOURCE_DIR}/src/ext/png.c
         ${CMAKE_SOURCE_DIR}/src/studio/project.c)
 
     target_include_directories(xplode PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/include)
-    target_link_libraries(xplode tic80core png giflib)
+    target_link_libraries(xplode tic80core png)
 
     if(LINUX)
         target_link_libraries(xplode m)
@@ -928,7 +927,7 @@ if(BUILD_DEMO_CARTS)
 
     endforeach(CART_FILE)
 
-    # we need to build these separatly combining both the project
+    # we need to build these separately combining both the project
     # and the external WASM binary chunk since projects do not
     # include BINARY chunks
 
@@ -974,25 +973,20 @@ add_library(argparse STATIC ${THIRDPARTY_DIR}/argparse/argparse.c)
 target_include_directories(argparse INTERFACE ${THIRDPARTY_DIR}/argparse)
 
 ################################
-# libuv
+# naett
 ################################
 
-if(USE_LIBUV)
-    add_subdirectory(${THIRDPARTY_DIR}/libuv)
+if(USE_NAETT)
+    add_library(naett STATIC ${THIRDPARTY_DIR}/naett/naett.c)
+    target_include_directories(naett PUBLIC ${THIRDPARTY_DIR}/naett)
 
-    # fix for winxp build
-    set(UV_DEFS LOAD_LIBRARY_SEARCH_SYSTEM32=0x00000800)
-    target_compile_definitions(uv PRIVATE ${UV_DEFS})
-    target_compile_definitions(uv_a PRIVATE ${UV_DEFS})
-endif()
-
-################################
-# HTTP parser
-################################
-
-if(USE_LIBUV)
-    add_library(http_parser STATIC ${THIRDPARTY_DIR}/http-parser/http_parser.c)
-    target_include_directories(http_parser INTERFACE ${THIRDPARTY_DIR}/http-parser)
+    if(WIN32)
+        target_link_libraries(naett INTERFACE winhttp)
+    elseif(LINUX)
+        find_package(CURL REQUIRED)
+        target_include_directories(naett PRIVATE ${CURL_INCLUDE_DIRS})
+        target_link_libraries(naett ${CURL_LIBRARIES})
+    endif()
 endif()
 
 ################################
@@ -1077,9 +1071,9 @@ target_include_directories(tic80studio PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 target_link_libraries(tic80studio tic80core zip wave_writer argparse giflib png)
 
-if(USE_LIBUV)
-    target_compile_definitions(tic80studio PRIVATE USE_LIBUV)
-    target_link_libraries(tic80studio uv_a http_parser)
+if(USE_NAETT)
+    target_compile_definitions(tic80studio PRIVATE USE_NAETT)
+    target_link_libraries(tic80studio naett)
 endif()
 
 if(BUILD_PRO)
@@ -1199,7 +1193,7 @@ if(BUILD_SDL)
     endif()
 
     if(EMSCRIPTEN)
-        set_target_properties(tic80 PROPERTIES LINK_FLAGS "-s WASM=1 -s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s FETCH=1 -s EXPORT_ES6=1 -s MODULARIZE=1  -s ENVIRONMENT=web -s EXPORT_NAME=createModule -s EXPORTED_RUNTIME_METHODS=['ENV'] -lidbfs.js")
+        set_target_properties(tic80 PROPERTIES LINK_FLAGS "-s WASM=1 -s USE_SDL=2 -s ALLOW_MEMORY_GROWTH=1 -s FETCH=1 --pre-js ${CMAKE_SOURCE_DIR}/build/html/prejs.js -lidbfs.js")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -s USE_SDL=2")
 
         if(CMAKE_BUILD_TYPE STREQUAL "Debug")
